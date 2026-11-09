@@ -5,7 +5,7 @@ Standalone agent service, independent of Nopeus Business.
 On an existing Linux x86-64 Docker server (including a Coolify host):
 
 ```sh
-curl -fsSL https://nopeus.xyz/agent/install | bash
+curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash
 ```
 
 The installer downloads a checksum-pinned, prebuilt runtime, installs a background
@@ -16,7 +16,7 @@ volume. No public ports or domains are required. Docker Compose v2 is a prerequi
 the installer does not install or reconfigure Docker or other Coolify applications.
 
 Later: `nopeus-agent setup`, `nopeus-agent status`, `nopeus-agent logs`.
-Install unattended: `curl -fsSL https://nopeus.xyz/agent/install | bash -s -- --no-setup`.
+Install unattended: `curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash -s -- --no-setup`.
 Run setup later from an interactive terminal.
 
 This first pilot is text-and-messaging only. Computer tools, presentation artifacts,
@@ -37,3 +37,6 @@ Docker and an interactive controlling terminal unless `--no-setup` is passed.
 Persistent volume: `nopeus-agent_agent-data`. Back up the entire volume with the
 service stopped. Re-running the installer preserves it. Deleting that volume deletes
 credentials, pairing and conversation history. No Business migration is performed.
+
+The shorter `https://nopeus.xyz/agent/install` alias is awaiting website deployment.
+The public GitHub URL above is verified and needs no GitHub login.
