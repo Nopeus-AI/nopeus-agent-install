@@ -71,3 +71,15 @@ account. Keep the setup terminal open and return there to confirm/save. Pairing
 expires after five minutes; retry with a fresh link after timeout. The bot sends
 an acknowledgement when an account is detected. Access still requires terminal
 confirmation. The update preserves existing settings and account credentials.
+
+## Create a bot for me (v0.1.4)
+
+Telegram setup now defaults to Create a bot for me. Enter a name, follow the private
+link to @NopeusSetupBot, approve Telegram's bot-creation prompt and Confirm this bot,
+then return to setup to connect/save. Token and owner ID transfer automatically.
+After saving, open the new bot and tap Start. BotFather/token copying is only needed
+for the advanced existing-bot path. The standalone agent uses the existing setup
+API and does not require the Business suite. The user owns the child bot;
+@NopeusSetupBot remains its manager. Ordinary agent messages go directly between
+the user's server and Telegram. No model keys, conversations or files are sent to
+the setup service. Real creation requires the user's Telegram approval.
