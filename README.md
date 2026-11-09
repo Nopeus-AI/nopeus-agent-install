@@ -40,3 +40,16 @@ credentials, pairing and conversation history. No Business migration is performe
 
 The shorter `https://nopeus.xyz/agent/install` alias is awaiting website deployment.
 The public GitHub URL above is verified and needs no GitHub login.
+
+## OpenAI subscription login (v0.1.1)
+
+Exit the old setup wizard, rerun the public install command, then select OpenAI →
+Sign in with ChatGPT subscription. Open the displayed device link on your phone
+or computer and enter its one-time code. No API key is needed for that mode.
+Account/workspace model availability and usage limits apply. Device-code access
+may need to be enabled in ChatGPT security settings. API keys remain an explicit
+alternative; other providers still use API keys in this release.
+
+Existing installation data is preserved during the upgrade. The engine stores
+and refreshes its ChatGPT session in the persistent agent home. Live sign-in is
+completed by the account owner; automated validation uses synthetic credentials.
