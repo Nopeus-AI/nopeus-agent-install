@@ -2,12 +2,12 @@
 # Standalone Nopeus Agent public installer. No source checkout, build, or GitHub login.
 set -euo pipefail
 umask 077
-RELEASE='0.1.1'
-IMAGE='nopeus-agent-runtime:0.1.1'
-IMAGE_INDEX='sha256:ffd298ee239f61f19d8467babfffd2f5bd96ce9cc4e22c94e0a9cf8dea774cd4'
-IMAGE_CONFIG='sha256:c47f5161bcdb0b1f2a4d8e591f5d9c502cd658b18b9905a72b4240df81dcdde1'
-ARCHIVE_SHA256='190b7dc34cea715e0f2a96ae4f156ea771c81945aa9dde9449c17d2e5b356465'
-ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.1.1/nopeus-agent-linux-amd64.tar.gz'
+RELEASE='0.1.2'
+IMAGE='nopeus-agent-runtime:0.1.2'
+IMAGE_INDEX='sha256:b4cf940b14ecc09472eca839d523e2056636f6a131942bd647b94ed663b35708'
+IMAGE_CONFIG='sha256:2cde235aae883980627b30d106b9dad36e3f0ba4871f41f5e615f779a0c8472c'
+ARCHIVE_SHA256='ec777750724b0f1cc403710325b82c8c4de57f1fa7b4d38232b9eb0f42c84bdc'
+ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.1.2/nopeus-agent-linux-amd64.tar.gz'
 run_setup=true
 case "${1:-}" in
   --no-setup) run_setup=false ;;

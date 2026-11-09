@@ -53,3 +53,11 @@ alternative; other providers still use API keys in this release.
 Existing installation data is preserved during the upgrade. The engine stores
 and refreshes its ChatGPT session in the persistent agent home. Live sign-in is
 completed by the account owner; automated validation uses synthetic credentials.
+
+## Telegram pairing (v0.1.2)
+
+No numeric Telegram user-ID lookup is needed. Choose Pair my account in setup,
+open the private link in Telegram, tap Start, and confirm your account in the
+terminal. Save to grant access. Expired links, groups and bot accounts cannot enroll.
+Manual numeric IDs remain an advanced option. Rerun the installer to upgrade;
+your stored data and ChatGPT sign-in are preserved.
