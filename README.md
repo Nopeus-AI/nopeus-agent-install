@@ -61,3 +61,13 @@ open the private link in Telegram, tap Start, and confirm your account in the
 terminal. Save to grant access. Expired links, groups and bot accounts cannot enroll.
 Manual numeric IDs remain an advanced option. Rerun the installer to upgrade;
 your stored data and ChatGPT sign-in are preserved.
+
+## Pairing link fallback (v0.1.3)
+
+Setup now preserves the full Telegram link behind a short clickable label. If the
+link only opens the bot chat, paste the exact /start command displayed in setup
+into that chat. A plain /start without its pairing argument does not enroll an
+account. Keep the setup terminal open and return there to confirm/save. Pairing
+expires after five minutes; retry with a fresh link after timeout. The bot sends
+an acknowledgement when an account is detected. Access still requires terminal
+confirmation. The update preserves existing settings and account credentials.
