@@ -51,6 +51,12 @@ container while preserving its data volume. The model receives no shell or Docke
 access. Without systemd, update from the server terminal with `nopeus-agent update`.
 This update action does not let the model change its own source code.
 
+## Telegram command menu (v0.1.8)
+
+The runtime registers `/start`, `/new`, `/status`, `/handoff`, `/link`, `/cancel`,
+`/upgrade`, and `/version` with Telegram on startup. They appear in the chat's slash
+command menu. Existing agent data is preserved during upgrade.
+
 ## OpenAI subscription login (v0.1.1)
 
 Exit the old setup wizard, rerun the public install command, then select OpenAI →
