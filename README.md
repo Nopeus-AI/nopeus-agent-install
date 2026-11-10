@@ -8,8 +8,9 @@ On an existing Linux x86-64 Docker server (including a Coolify host):
 curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash
 ```
 
-The installer downloads a checksum-pinned, prebuilt runtime, installs a background
-service and the `nopeus-agent` command, and opens the terminal setup wizard. No
+The installer downloads a checksum-pinned bundle of prebuilt agent, workspace,
+browser and audio images, installs a background service and the `nopeus-agent`
+command, and opens the terminal setup wizard. No
 GitHub login, source checkout, host Node.js, or build is needed. Enter model keys
 and channel settings in the wizard; settings and conversations persist in a Docker
 volume. No public ports or domains are required. Docker Compose v2 is a prerequisite;
@@ -19,24 +20,29 @@ Later: `nopeus-agent setup`, `nopeus-agent status`, `nopeus-agent logs`.
 Install unattended: `curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash -s -- --no-setup`.
 Run setup later from an interactive terminal.
 
-This first pilot is text-and-messaging only. Computer tools, presentation artifacts,
-learning and VM control are not yet implemented. AI usage and server costs are separate.
-WhatsApp pairing uses the QR in service logs; protect those logs.
+The current alpha includes isolated workspace tools, approval-gated file writes,
+terminal commands and browser interactions, public web research, schedules,
+conversation memory, versioned skills, image/PDF handling and local audio
+transcription. The browser and terminal workers run as separate services. This is
+still a Docker-based single-agent prototype, not a VM-per-agent boundary. Automatic
+skill evaluation, demonstration capture, teams, personal-device companions and
+native mobile clients are not included. AI usage and server costs are separate.
 
 ## Releases
 
-Release assets contain the Linux amd64 Docker runtime archive, reviewed installer
+Release assets contain the Linux amd64 Docker image bundle, reviewed installer
 and checksums. This distribution repository does not contain development credentials,
 customer data, or the private development history. Runtime code and dependencies
 are included in the executable image; their notices remain in that image.
 
-Inspect the installer before running if desired. The script pins the runtime archive
-SHA256 and reviewed Docker image identity. Installation requires permission to use
+Inspect the installer before running if desired. The script pins the release archive
+SHA256 and every Docker image identity. Installation requires permission to use
 Docker and an interactive controlling terminal unless `--no-setup` is passed.
 
-Persistent volume: `nopeus-agent_agent-data`. Back up the entire volume with the
-service stopped. Re-running the installer preserves it. Deleting that volume deletes
-credentials, pairing and conversation history. No Business migration is performed.
+Persistent volumes include `agent-data`, `agent-workspace`, `agent-control`,
+`agent-browser-profile`, and `audio-control`. Back them up with the service stopped.
+Re-running the installer preserves them. Deleting them deletes credentials, pairing,
+conversation history, files, and browser state. No Business migration is performed.
 
 The shorter `https://nopeus.xyz/agent/install` alias redirects to the current
 installer on this repository's main branch. The public GitHub URL above also

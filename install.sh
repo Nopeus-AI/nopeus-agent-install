@@ -2,12 +2,14 @@
 # Standalone Nopeus Agent public installer. No source checkout, build, or GitHub login.
 set -euo pipefail
 umask 077
-RELEASE='0.1.8'
-IMAGE='nopeus-agent-runtime:0.1.8'
-IMAGE_INDEX='sha256:4725974afd56c7c57e3f20ecaee46a2de22e7d7a3d353da4bcf7bb63ab90f443'
-IMAGE_CONFIG='sha256:80d31be56ac186f48f94d23db1ad832f31bc4cda49ffe742e52da6f1eda7b8f9'
-ARCHIVE_SHA256='d64aebbf92834fee78d7a1ca155b651ca496c62fdf2aa077db336ce3096edea3'
-ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.1.8/nopeus-agent-linux-amd64.tar.gz'
+RELEASE='0.2.0-alpha.22'
+RELEASE_TAG='v0.2.0-alpha.22'
+IMAGES=(nopeus-agent-runtime:0.2.0-alpha.22 nopeus-agent-browser-egress:0.2.0-alpha.22 nopeus-agent-browser:0.2.0-alpha.22 nopeus-agent-browser-runtime:0.2.0-alpha.22 nopeus-agent-audio:0.2.0-alpha.22)
+IMAGE_IDS=(sha256:6ba5b7abb4a3b0fa9649f948f8dce0a15b961e409e14d56b2424b616de3d2bb7 sha256:64f032beaa61efcbc64f7980a1c4fd418506129717a07edce4a5380b02d7debe sha256:184fab2c001601b10025e7c6d822a5e41ca60b6cec64662b3c69f3559b76baea sha256:57c8a6ba2e706f2e220ab2fae1c7f91b7b115e06783a5e585691920c103209c1 sha256:5e8af8ef1853488b131eb0eb1540be3a17792793870430520880c30b253f8131)
+ARCHIVE_SHA256='d76414f2202e37604177de4804f1223d8841a48591c69dcac354f7be173e36c1'
+BROWSER_ARCHIVE_SHA256='144e2437ccc10c9774d97ed2384b19afe2961be1a476a94ba6f4a4c4945fc680'
+ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.2.0-alpha.22/nopeus-agent-linux-amd64.tar.gz'
+BROWSER_ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.2.0-alpha.22/nopeus-agent-browser-linux-amd64.tar.gz'
 run_setup=true
 case "${1:-}" in
   --no-setup) run_setup=false ;;
@@ -17,7 +19,7 @@ case "${1:-}" in
 esac
 die() { printf '%s\n' "$*" >&2; exit 1; }
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || die 'This pilot installer supports Linux x86-64 servers only.'
-for command in docker curl sha256sum; do command -v "$command" >/dev/null || die "Required command missing: $command"; done
+for command in docker curl sha256sum tar gzip sed; do command -v "$command" >/dev/null || die "Required command missing: $command"; done
 docker compose version >/dev/null || die 'Docker Compose v2 is required.'
 docker info >/dev/null 2>&1 || die 'Cannot access Docker. Use a server account authorized to run Docker (Coolify servers already have it).'
 [[ "$(docker info --format '{{.OSType}}')" == linux ]] || die 'A Linux Docker engine is required.'
@@ -39,21 +41,29 @@ launcher="$bin_dir/nopeus-agent"
 if [[ -e "$launcher" || -L "$launcher" ]]; then
   [[ -f "$launcher" && ! -L "$launcher" ]] && head -n 3 -- "$launcher" | grep -Fq '# Nopeus Agent managed launcher' || die "Refusing to replace unrelated command: $launcher"
 fi
-printf 'Installing Nopeus Agent %s (text-and-messaging pilot).\n' "$RELEASE"
+printf 'Installing Nopeus Agent %s (standalone alpha).\n' "$RELEASE"
 printf 'Model keys and messaging accounts are configured afterward in the terminal UI.\n'
 work_dir="$(mktemp -d)"
 trap 'rm -rf -- "$work_dir"' EXIT
-verify_image() {
-  local image_id
-  image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}' 2>/dev/null)" || return 1
-  [[ "$image_id" == "$IMAGE_INDEX" || "$image_id" == "$IMAGE_CONFIG" ]]
+verify_images() {
+  local i image_id
+  for i in "${!IMAGES[@]}"; do
+    image_id="$(docker image inspect "${IMAGES[$i]}" --format '{{.Id}}' 2>/dev/null)" || return 1
+    [[ "$image_id" == "${IMAGE_IDS[$i]}" ]] || return 1
+  done
 }
-if ! verify_image; then
-  printf 'Downloading the prebuilt runtime (no GitHub login required)...\n'
-  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$ARCHIVE_URL" -o "$work_dir/runtime.tar.gz" </dev/null
-  printf '%s  %s\n' "$ARCHIVE_SHA256" "$work_dir/runtime.tar.gz" | sha256sum --check --status || die 'Runtime checksum mismatch. Nothing was loaded.'
-  docker load --input "$work_dir/runtime.tar.gz" </dev/null
-  verify_image || die 'Loaded runtime does not match the reviewed release identity.'
+if ! verify_images; then
+  printf 'Downloading the prebuilt runtime and isolated worker images...\n'
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$ARCHIVE_URL" -o "$work_dir/release.tar.gz" </dev/null
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$BROWSER_ARCHIVE_URL" -o "$work_dir/browser-images.tar.gz" </dev/null
+  printf '%s  %s\n' "$ARCHIVE_SHA256" "$work_dir/release.tar.gz" | sha256sum --check --status || die 'Release checksum mismatch. Nothing was loaded.'
+  printf '%s  %s\n' "$BROWSER_ARCHIVE_SHA256" "$work_dir/browser-images.tar.gz" | sha256sum --check --status || die 'Browser runtime checksum mismatch. Nothing was loaded.'
+  mkdir "$work_dir/package"
+  tar -xzf "$work_dir/release.tar.gz" --no-same-owner --no-same-permissions -C "$work_dir/package"
+  [[ -f "$work_dir/package/images.tar" && -f "$work_dir/package/compose.yaml" && -f "$work_dir/package/seccomp/chromium.json" ]] || die 'Release package is incomplete.'
+  docker load --input "$work_dir/package/images.tar" </dev/null
+  gzip -dc "$work_dir/browser-images.tar.gz" | docker load
+  verify_images || die 'Loaded images do not match the reviewed release identities.'
 fi
 launcher="$bin_dir/nopeus-agent"
 launcher_tmp="$(mktemp "$bin_dir/.nopeus-agent.XXXXXX")"
@@ -117,42 +127,24 @@ elif command -v systemctl >/dev/null && systemctl --user show-environment >/dev/
   fi
 fi
 
-cat > "$work_dir/compose.yaml" <<COMPOSE
-# Nopeus Agent managed runtime
-services:
-  agent:
-    image: $IMAGE
-    pull_policy: never
-    init: true
-    restart: unless-stopped
-    environment:
-      NOPEUS_HOST: 0.0.0.0
-      NOPEUS_PORT: 7331
-      NOPEUS_DATA_DIR: /data
-      NOPEUS_AUTO_UPDATE_ENABLED: "$auto_update_enabled"
-    volumes:
-      - agent-data:/data
-    healthcheck:
-      test: ["CMD", "node", "src/healthcheck.js"]
-      interval: 15s
-      timeout: 8s
-      start_period: 180s
-      retries: 5
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    mem_limit: 2g
-    pids_limit: 256
-volumes:
-  agent-data:
-COMPOSE
+if [[ ! -f "$work_dir/package/compose.yaml" ]]; then
+  curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$ARCHIVE_URL" -o "$work_dir/release.tar.gz" </dev/null
+  printf '%s  %s\n' "$ARCHIVE_SHA256" "$work_dir/release.tar.gz" | sha256sum --check --status || die 'Release checksum mismatch.'
+  mkdir -p "$work_dir/package"
+  tar -xzf "$work_dir/release.tar.gz" --no-same-owner --no-same-permissions -C "$work_dir/package"
+fi
+sed "s/__AUTO_UPDATE_ENABLED__/$auto_update_enabled/" "$work_dir/package/compose.yaml" > "$work_dir/compose.yaml"
+[[ ! -L "$install_dir/seccomp" ]] || die 'Refusing symlinked seccomp configuration.'
+mkdir -p "$install_dir/seccomp"
+cp "$work_dir/package/seccomp/chromium.json" "$install_dir/seccomp/chromium.json.tmp"
+chmod 600 "$install_dir/seccomp/chromium.json.tmp"
+mv "$install_dir/seccomp/chromium.json.tmp" "$install_dir/seccomp/chromium.json"
 # Create files atomically; keep the same project/volume on every reinstallation.
 compose_tmp="$(mktemp "$install_dir/.compose.XXXXXX")"
 cp -- "$work_dir/compose.yaml" "$compose_tmp"; chmod 600 "$compose_tmp"; mv -- "$compose_tmp" "$install_dir/compose.yaml"
 docker compose -p "$project" -f "$install_dir/compose.yaml" up -d --wait --wait-timeout 240 </dev/null
 printf '\nInstalled: %s\n' "$launcher"
-printf 'No public port or domain is needed. Existing data is preserved in the agent-data volume.\n'
+printf 'The agent, isolated workspace, browser, and audio services are installed. Existing conversation data is preserved in the agent-data volume.\n'
 if [[ "$auto_update_enabled" == true ]]; then printf 'Owner-triggered self-updates are enabled via /upgrade.\n'; else printf 'Self-updates need an active systemd service; use nopeus-agent update on the server meanwhile. A non-root user service also needs loginctl enable-linger.\n'; fi
 if [[ ":$PATH:" != *":$bin_dir:"* ]]; then printf 'To use the short command: export PATH="%s:$PATH"\n' "$bin_dir"; fi
 if [[ "$run_setup" == true ]]; then

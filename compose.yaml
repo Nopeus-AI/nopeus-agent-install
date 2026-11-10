@@ -1,0 +1,235 @@
+# Git-based Coolify application; no .env file or published host port required.
+services:
+  agent:
+    image: nopeus-agent-runtime:0.2.0-alpha.22
+    pull_policy: never
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    restart: unless-stopped
+    environment:
+      NOPEUS_HOST: 0.0.0.0
+      NOPEUS_PORT: 7331
+      NOPEUS_DATA_DIR: /data
+      NOPEUS_WORKSPACE_DIR: /workspace
+      NOPEUS_CONTROL_DIR: /control
+      NOPEUS_AUDIO_CONTROL_DIR: /audio-control
+      NOPEUS_WORKSPACE_MCP_URL: http://workspace-worker:7332/mcp
+      NOPEUS_AUDIO_WORKER_URL: http://audio-worker:7335
+      NOPEUS_EXECUTION_ALPHA: "true"
+      NOPEUS_BROWSER_ALPHA: "true"
+      NOPEUS_AUTO_UPDATE_ENABLED: "__AUTO_UPDATE_ENABLED__"
+    expose:
+      - "7331"
+    volumes:
+      - agent-data:/data
+      - agent-workspace:/workspace
+      - agent-control:/control
+      - audio-control:/audio-control
+    networks:
+      - default
+      - execution
+      - browser-control
+      - audio-control
+    depends_on:
+      workspace-worker:
+        condition: service_healthy
+      browser-worker:
+        condition: service_started
+      audio-worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "src/healthcheck.js"]
+      interval: 15s
+      timeout: 8s
+      start_period: 180s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    pids_limit: 256
+  workspace-worker:
+    image: nopeus-agent-runtime:0.2.0-alpha.22
+    pull_policy: never
+    command: ["node", "src/workspace-worker.js"]
+    user: "0:1000"
+    init: true
+    restart: unless-stopped
+    environment:
+      NOPEUS_WORKSPACE_DIR: /workspace
+      NOPEUS_WORKER_TOKEN_FILE: /control/worker-token
+      NOPEUS_CONTROL_URL: http://agent:7331
+      NOPEUS_BROWSER_CONTROL_DIR: /control
+      NOPEUS_BROWSER_MCP_URL: http://browser-worker:7333/tool
+    volumes:
+      - agent-workspace:/workspace
+      - agent-control:/control
+    networks:
+      - execution
+      - browser-control
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    mem_limit: 512m
+    pids_limit: 64
+    expose:
+      - "7332"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7332/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+  browser-egress:
+    image: nopeus-agent-browser-egress:0.2.0-alpha.22
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    networks:
+      - default
+      - browser-proxy
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    pids_limit: 32
+    expose:
+      - "7334"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7334/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+  browser-worker:
+    image: nopeus-agent-browser:0.2.0-alpha.22
+    pull_policy: never
+    command: ["node", "src/browser-worker.js"]
+    init: true
+    restart: unless-stopped
+    environment:
+      NOPEUS_BROWSER_TOKEN_FILE: /control/browser-worker-token
+      NOPEUS_BROWSER_CDP_URL: http://browser-runtime:9222
+    volumes:
+      - agent-control:/control:ro
+    networks:
+      - browser-control
+      - browser-remote
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 64
+    expose:
+      - "7333"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7333/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 5
+    depends_on:
+      workspace-worker:
+        condition: service_healthy
+      browser-runtime:
+        condition: service_healthy
+  browser-runtime:
+    image: nopeus-agent-browser-runtime:0.2.0-alpha.22
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    environment:
+      NOPEUS_BROWSER_PROFILE: /browser-profile
+      NOPEUS_BROWSER_PROXY: http://browser-egress:7334
+    volumes:
+      - agent-browser-profile:/browser-profile
+    networks:
+      - browser-remote
+      - browser-proxy
+    read_only: true
+    shm_size: 512mb
+    tmpfs:
+      - /tmp:size=128m,exec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./seccomp/chromium.json
+    cap_drop:
+      - ALL
+    mem_limit: 1536m
+    pids_limit: 128
+    expose:
+      - "9222"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9222/json/version').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 5
+    depends_on:
+      browser-egress:
+        condition: service_healthy
+  audio-worker:
+    image: nopeus-agent-audio:0.2.0-alpha.22
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    environment:
+      NOPEUS_AUDIO_TOKEN_FILE: /control/audio-worker-token
+    volumes:
+      - audio-control:/control:ro
+    networks:
+      - audio-control
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    cpus: 1.5
+    pids_limit: 32
+    expose:
+      - "7335"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7335/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+volumes:
+  agent-data:
+  agent-workspace:
+  agent-control:
+  agent-browser-profile:
+  audio-control:
+networks:
+  default: {}
+  execution:
+    internal: true
+  browser-control:
+    internal: true
+  browser-remote:
+    internal: true
+  browser-proxy:
+    internal: true
+  audio-control:
+    internal: true
