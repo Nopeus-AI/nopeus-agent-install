@@ -38,8 +38,18 @@ Persistent volume: `nopeus-agent_agent-data`. Back up the entire volume with the
 service stopped. Re-running the installer preserves it. Deleting that volume deletes
 credentials, pairing and conversation history. No Business migration is performed.
 
-The shorter `https://nopeus.xyz/agent/install` alias is awaiting website deployment.
-The public GitHub URL above is verified and needs no GitHub login.
+The shorter `https://nopeus.xyz/agent/install` alias redirects to the current
+installer on this repository's main branch. The public GitHub URL above also
+works directly and needs no GitHub login.
+
+## Owner-triggered self-update (v0.1.7)
+
+On hosts with an active systemd service, the installer enables a small host-side
+watcher. An authorized private Telegram or WhatsApp sender can ask for an update
+or send `/upgrade`. The watcher runs the checksum-pinned installer and restarts the
+container while preserving its data volume. The model receives no shell or Docker
+access. Without systemd, update from the server terminal with `nopeus-agent update`.
+This update action does not let the model change its own source code.
 
 ## OpenAI subscription login (v0.1.1)
 

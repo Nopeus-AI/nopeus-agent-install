@@ -2,12 +2,12 @@
 # Standalone Nopeus Agent public installer. No source checkout, build, or GitHub login.
 set -euo pipefail
 umask 077
-RELEASE='0.1.6'
-IMAGE='nopeus-agent-runtime:0.1.6'
-IMAGE_INDEX='sha256:f0cdfd27bef80a6659c2d419dea918a2e76f5c16af22cacc754a44d0e0a3911a'
-IMAGE_CONFIG='sha256:574974a34555199f62b8d18e680350e4929f1d5a413bc4d2aafa8ed701371074'
-ARCHIVE_SHA256='54ee31b33ea18c5b16b92c8982bd846b6d980bb67ba6079386496aeb647343fa'
-ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.1.6/nopeus-agent-linux-amd64.tar.gz'
+RELEASE='0.1.7'
+IMAGE='nopeus-agent-runtime:0.1.7'
+IMAGE_INDEX='sha256:47553e247ed307f3948b0cfb5dd85d45d6854ef4a22de0dbd4618c6934034795'
+IMAGE_CONFIG='sha256:4a2f538a20065517eb3fd01fb9ac4a20106476ee23240f407a05550f542dd627'
+ARCHIVE_SHA256='0471adcc773a0433741e2722ca5014b1276e72f4ecf817aec97cd733a78371d8'
+ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.1.7/nopeus-agent-linux-amd64.tar.gz'
 run_setup=true
 case "${1:-}" in
   --no-setup) run_setup=false ;;
@@ -55,38 +55,7 @@ if ! verify_image; then
   docker load --input "$work_dir/runtime.tar.gz" </dev/null
   verify_image || die 'Loaded runtime does not match the reviewed release identity.'
 fi
-cat > "$work_dir/compose.yaml" <<COMPOSE
-# Nopeus Agent managed runtime
-services:
-  agent:
-    image: $IMAGE
-    pull_policy: never
-    init: true
-    restart: unless-stopped
-    environment:
-      NOPEUS_HOST: 0.0.0.0
-      NOPEUS_PORT: 7331
-      NOPEUS_DATA_DIR: /data
-    volumes:
-      - agent-data:/data
-    healthcheck:
-      test: ["CMD", "node", "src/healthcheck.js"]
-      interval: 15s
-      timeout: 8s
-      start_period: 180s
-      retries: 5
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    mem_limit: 2g
-    pids_limit: 256
-volumes:
-  agent-data:
-COMPOSE
-# Create files atomically; keep the same project/volume on every reinstallation.
-compose_tmp="$(mktemp "$install_dir/.compose.XXXXXX")"
-cp -- "$work_dir/compose.yaml" "$compose_tmp"; chmod 600 "$compose_tmp"; mv -- "$compose_tmp" "$install_dir/compose.yaml"
+launcher="$bin_dir/nopeus-agent"
 launcher_tmp="$(mktemp "$bin_dir/.nopeus-agent.XXXXXX")"
 {
   printf '#!/usr/bin/env bash\n# Nopeus Agent managed launcher\nset -euo pipefail\n'
@@ -107,9 +76,84 @@ esac
 LAUNCHER
 } > "$launcher_tmp"
 chmod 700 "$launcher_tmp"; mv -- "$launcher_tmp" "$launcher"
+
+# The model can only submit an owner-authorized update request. This host watcher
+# consumes that request and runs the fixed, checksum-pinned installer command.
+watcher="$install_dir/update-watcher.sh"
+watcher_tmp="$(mktemp "$install_dir/.update-watcher.XXXXXX")"
+{
+  printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+  printf 'launcher=%q\n' "$launcher"
+  cat <<'WATCHER'
+while true; do
+  request_id="$("$launcher" update-request-check 2>/dev/null || true)"
+  if [[ "$request_id" =~ ^[0-9a-f-]{36}$ ]] && "$launcher" update-request-clear "$request_id" >/dev/null 2>&1; then
+    if ! "$launcher" update; then printf '%s\n' 'Nopeus Agent self-update failed; request cleared. Retry with /upgrade or update from the server.' >&2; fi
+  fi
+  sleep 15
+done
+WATCHER
+} > "$watcher_tmp"
+chmod 700 "$watcher_tmp"; mv -- "$watcher_tmp" "$watcher"
+
+auto_update_enabled=false
+unit_name=nopeus-agent-updater.service
+systemd_escape() { printf '%q' "$1"; }
+if [[ "$EUID" -eq 0 && -d /run/systemd/system ]] && command -v systemctl >/dev/null && systemctl show-environment >/dev/null 2>&1; then
+  unit_file="/etc/systemd/system/$unit_name"
+  if [[ ! -e "$unit_file" ]] || grep -Fq '# Nopeus Agent update watcher' "$unit_file"; then
+    { printf '[Unit]\nDescription=Nopeus Agent update watcher\n# Nopeus Agent update watcher\nAfter=network-online.target docker.service\n\n[Service]\nType=simple\n';
+      printf 'ExecStart=%s\nRestart=always\nRestartSec=15\nNoNewPrivileges=true\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n' "$(systemd_escape "$watcher")"; } > "$unit_file"
+    if systemctl daemon-reload && systemctl enable --now "$unit_name"; then auto_update_enabled=true; fi
+  fi
+elif command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
+  unit_dir="$HOME/.config/systemd/user"; mkdir -p -- "$unit_dir"; unit_file="$unit_dir/$unit_name"
+  linger=false
+  if command -v loginctl >/dev/null; then [[ "$(loginctl show-user "${USER:-$(id -un)}" -p Linger --value 2>/dev/null || true)" == yes ]] && linger=true; fi
+  if [[ "$linger" == true ]] && { [[ ! -e "$unit_file" ]] || grep -Fq '# Nopeus Agent update watcher' "$unit_file"; }; then
+    { printf '[Unit]\nDescription=Nopeus Agent update watcher\n# Nopeus Agent update watcher\nAfter=network-online.target\n\n[Service]\nType=simple\n';
+      printf 'ExecStart=%s\nRestart=always\nRestartSec=15\nNoNewPrivileges=true\nUMask=0077\n\n[Install]\nWantedBy=default.target\n' "$(systemd_escape "$watcher")"; } > "$unit_file"
+    if systemctl --user daemon-reload && systemctl --user enable --now "$unit_name"; then auto_update_enabled=true; fi
+  fi
+fi
+
+cat > "$work_dir/compose.yaml" <<COMPOSE
+# Nopeus Agent managed runtime
+services:
+  agent:
+    image: $IMAGE
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    environment:
+      NOPEUS_HOST: 0.0.0.0
+      NOPEUS_PORT: 7331
+      NOPEUS_DATA_DIR: /data
+      NOPEUS_AUTO_UPDATE_ENABLED: "$auto_update_enabled"
+    volumes:
+      - agent-data:/data
+    healthcheck:
+      test: ["CMD", "node", "src/healthcheck.js"]
+      interval: 15s
+      timeout: 8s
+      start_period: 180s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    pids_limit: 256
+volumes:
+  agent-data:
+COMPOSE
+# Create files atomically; keep the same project/volume on every reinstallation.
+compose_tmp="$(mktemp "$install_dir/.compose.XXXXXX")"
+cp -- "$work_dir/compose.yaml" "$compose_tmp"; chmod 600 "$compose_tmp"; mv -- "$compose_tmp" "$install_dir/compose.yaml"
 docker compose -p "$project" -f "$install_dir/compose.yaml" up -d --wait --wait-timeout 240 </dev/null
 printf '\nInstalled: %s\n' "$launcher"
 printf 'No public port or domain is needed. Existing data is preserved in the agent-data volume.\n'
+if [[ "$auto_update_enabled" == true ]]; then printf 'Owner-triggered self-updates are enabled via /upgrade.\n'; else printf 'Self-updates need an active systemd service; use nopeus-agent update on the server meanwhile. A non-root user service also needs loginctl enable-linger.\n'; fi
 if [[ ":$PATH:" != *":$bin_dir:"* ]]; then printf 'To use the short command: export PATH="%s:$PATH"\n' "$bin_dir"; fi
 if [[ "$run_setup" == true ]]; then
   # curl | bash owns stdin. Read terminal interaction from the controlling TTY instead.
