@@ -146,7 +146,10 @@ compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
 case "${1:-}" in
   start)
     "${compose[@]}" up -d --wait --wait-timeout 240 --no-deps agent workspace-worker browser-worker browser-runtime browser-egress audio-worker computer-vm
-    exec "${compose[@]}" up -d --no-deps researcher-computer planner-computer reviewer-computer researcher-worker planner-worker reviewer-worker ;;
+    "${compose[@]}" up -d --no-deps researcher-computer planner-computer reviewer-computer
+    "${compose[@]}" create researcher-worker planner-worker reviewer-worker
+    mapfile -t specialist_worker_ids < <("${compose[@]}" ps -a -q researcher-worker planner-worker reviewer-worker)
+    if ((${#specialist_worker_ids[@]})); then docker start "${specialist_worker_ids[@]}" >/dev/null; fi ;;
   stop) exec "${compose[@]}" stop ;;
   restart) exec "${compose[@]}" restart agent ;;
   logs) exec "${compose[@]}" logs -f agent ;;
@@ -229,7 +232,10 @@ compose_tmp="$(mktemp "$install_dir/.compose.XXXXXX")"
 cp -- "$work_dir/compose.yaml" "$compose_tmp"; chmod 600 "$compose_tmp"; mv -- "$compose_tmp" "$install_dir/compose.yaml"
 compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
 "${compose[@]}" up -d --wait --wait-timeout 240 --no-deps agent workspace-worker browser-worker browser-runtime browser-egress audio-worker computer-vm </dev/null
-"${compose[@]}" up -d --no-deps researcher-computer planner-computer reviewer-computer researcher-worker planner-worker reviewer-worker </dev/null
+"${compose[@]}" up -d --no-deps researcher-computer planner-computer reviewer-computer </dev/null
+"${compose[@]}" create researcher-worker planner-worker reviewer-worker </dev/null
+mapfile -t specialist_worker_ids < <("${compose[@]}" ps -a -q researcher-worker planner-worker reviewer-worker)
+if ((${#specialist_worker_ids[@]})); then docker start "${specialist_worker_ids[@]}" >/dev/null; fi
 printf '\nInstalled: %s\n' "$launcher"
 printf 'The agent, isolated workspace, browser, and audio services are installed. Existing conversation data is preserved in the agent-data volume.\n'
 if [[ "$auto_update_enabled" == true ]]; then printf 'Owner-triggered self-updates are enabled via /upgrade.\n'; else printf 'Self-updates need an active systemd service; use nopeus-agent update on the server meanwhile. A non-root user service also needs loginctl enable-linger.\n'; fi
