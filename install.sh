@@ -41,7 +41,7 @@ OLD_VERSION=""
 update_project_compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
 send_update_telegram() {
   local message="$1"
-  "${update_project_compose[@]}" exec -T -e NOPEUS_UPDATE_MESSAGE="$message" agent node --input-type=module -e 'import { runtimeEnvironment } from "./src/config.js"; const env=runtimeEnvironment(); if (!env.TELEGRAM_BOT_TOKEN) process.exit(0); for (const id of (env.TELEGRAM_ALLOWED_USERS||"").split(",").filter(x=>/^\d+$/.test(x))) { const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:id,text:process.env.NOPEUS_UPDATE_MESSAGE})}); if (!r.ok) throw new Error("Telegram update notice failed"); }' >/dev/null 2>&1
+  "${update_project_compose[@]}" exec -T -e NOPEUS_UPDATE_MESSAGE="$message" agent node --input-type=module -e 'import { runtimeEnvironment } from "./src/config.js"; const env=runtimeEnvironment(); if (!env.TELEGRAM_BOT_TOKEN) process.exit(0); for (const id of (env.TELEGRAM_ALLOWED_USERS||"").split(",").filter(x=>/^\d+$/.test(x))) { const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:id,text:process.env.NOPEUS_UPDATE_MESSAGE})}); if (!r.ok) throw new Error("Telegram update notice failed"); }' >/dev/null 2>&1 </dev/null
 }
 finish_install() {
   local status=$?
@@ -55,7 +55,7 @@ trap finish_install EXIT
 # Read the running version before contacting GitHub so an update request still
 # gets a useful failure notice if release lookup or metadata validation fails.
 compose=("${update_project_compose[@]}")
-OLD_VERSION="$("${compose[@]}" exec -T agent node -p "require('./package.json').version" 2>/dev/null || true)"
+OLD_VERSION="$("${compose[@]}" exec -T agent node -p "require('./package.json').version" 2>/dev/null </dev/null || true)"
 if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
   update_started=true
 fi
@@ -104,7 +104,7 @@ if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$OLD_VERS
     -e NOPEUS_UPDATE_FROM_VERSION="$OLD_VERSION" \
     -e NOPEUS_UPDATE_TO_VERSION="$RELEASE" \
     -e NOPEUS_UPDATE_SUMMARY="$RELEASE_SUMMARY" \
-    agent node --input-type=module -e 'import { openSync, writeFileSync, closeSync, renameSync, lstatSync, existsSync } from "node:fs"; import { join } from "node:path"; import { dataDirectory } from "./src/config.js"; const dir=dataDirectory(); const path=join(dir,"update-notice.json"); if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("Refusing symlinked update notice"); const temp=join(dir,".update-notice-"+process.pid+".tmp"); const fd=openSync(temp,"wx",0o600); try { writeFileSync(fd,JSON.stringify({fromVersion:process.env.NOPEUS_UPDATE_FROM_VERSION,toVersion:process.env.NOPEUS_UPDATE_TO_VERSION,summary:process.env.NOPEUS_UPDATE_SUMMARY})+"\n"); closeSync(fd); renameSync(temp,path); } catch(e) { try { closeSync(fd); } catch {} throw e; }' >/dev/null 2>&1 || die 'Could not preserve the Telegram update completion notice; update cancelled before replacing the running agent.'
+    agent node --input-type=module -e 'import { openSync, writeFileSync, closeSync, renameSync, lstatSync, existsSync } from "node:fs"; import { join } from "node:path"; import { dataDirectory } from "./src/config.js"; const dir=dataDirectory(); const path=join(dir,"update-notice.json"); if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("Refusing symlinked update notice"); const temp=join(dir,".update-notice-"+process.pid+".tmp"); const fd=openSync(temp,"wx",0o600); try { writeFileSync(fd,JSON.stringify({fromVersion:process.env.NOPEUS_UPDATE_FROM_VERSION,toVersion:process.env.NOPEUS_UPDATE_TO_VERSION,summary:process.env.NOPEUS_UPDATE_SUMMARY})+"\n"); closeSync(fd); renameSync(temp,path); } catch(e) { try { closeSync(fd); } catch {} throw e; }' >/dev/null 2>&1 </dev/null || die 'Could not preserve the Telegram update completion notice; update cancelled before replacing the running agent.'
 elif [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
   update_started=false
   send_update_telegram "✅ Nopeus Agent is already up to date. This server is running v$OLD_VERSION, the latest published release. No restart was needed." || true
@@ -115,6 +115,15 @@ verify_images() {
     image_id="$(docker image inspect "${IMAGES[$i]}" --format '{{.Id}}' 2>/dev/null)" || return 1
     [[ "$image_id" == "${IMAGE_IDS[$i]}" ]] || return 1
   done
+}
+verify_loaded_release() {
+  local i image_id runtime_version
+  for i in "${!IMAGES[@]}"; do
+    image_id="$(docker image inspect "${IMAGES[$i]}" --format '{{.Id}}' 2>/dev/null)" || return 1
+    [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
+  done
+  runtime_version="$(docker run --rm --network none --entrypoint node "${IMAGES[0]}" -p "require('./package.json').version" </dev/null 2>/dev/null)" || return 1
+  [[ "$runtime_version" == "$RELEASE" ]]
 }
 if ! verify_images; then
   printf 'Downloading the prebuilt runtime and isolated worker images...\n'
@@ -127,7 +136,10 @@ if ! verify_images; then
   [[ -f "$work_dir/package/images.tar" && -f "$work_dir/package/compose.yaml" && -f "$work_dir/package/seccomp/chromium.json" ]] || die 'Release package is incomplete.'
   docker load --input "$work_dir/package/images.tar" </dev/null
   gzip -dc "$work_dir/browser-images.tar.gz" | docker load
-  verify_images || die 'Loaded images do not match the reviewed release identities.'
+  if ! verify_images; then
+    printf 'Release image IDs differ from the release metadata; checking the checksum-verified archive contents and runtime version.\n' >&2
+    verify_loaded_release || die 'Loaded release archive is missing images or its runtime version does not match the release.'
+  fi
 fi
 launcher="$bin_dir/nopeus-agent"
 launcher_tmp="$(mktemp "$bin_dir/.nopeus-agent.XXXXXX")"
