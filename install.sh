@@ -47,7 +47,15 @@ finish_install() {
   local status=$?
   if [[ "$status" -ne 0 && "$update_started" == true ]]; then
     local target="${RELEASE:-the latest release}"
-    send_update_telegram "⚠️ Nopeus Agent could not finish its update to $target. The running version was not confirmed; it should still be v$OLD_VERSION. Please retry /upgrade or run nopeus-agent update on the server." || true
+    local agent_id running_version agent_health
+    agent_id="$("${update_project_compose[@]}" ps -q agent 2>/dev/null || true)"
+    running_version="$("${update_project_compose[@]}" exec -T agent node -p "require('./package.json').version" 2>/dev/null </dev/null || true)"
+    agent_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$agent_id" 2>/dev/null || true)"
+    if [[ -n "${RELEASE:-}" && "$running_version" == "$RELEASE" && "$agent_health" == healthy ]]; then
+      printf 'Core agent %s is healthy; an optional service did not finish starting. No update failure notice sent.\n' "$RELEASE" >&2
+    else
+      send_update_telegram "⚠️ Nopeus Agent could not finish its update to $target. The running version was not confirmed; it should still be v$OLD_VERSION. Please retry /upgrade or run nopeus-agent update on the server." || true
+    fi
   fi
   rm -rf -- "$work_dir"
 }
@@ -149,7 +157,9 @@ launcher_tmp="$(mktemp "$bin_dir/.nopeus-agent.XXXXXX")"
   cat <<'LAUNCHER'
 compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
 case "${1:-}" in
-  start) exec "${compose[@]}" up -d --wait --wait-timeout 900 ;;
+  start)
+    "${compose[@]}" up -d --wait --wait-timeout 240 --no-deps agent workspace-worker browser-worker browser-runtime browser-egress audio-worker computer-vm
+    exec "${compose[@]}" up -d --no-deps researcher-computer planner-computer reviewer-computer researcher-worker planner-worker reviewer-worker ;;
   stop) exec "${compose[@]}" stop ;;
   restart) exec "${compose[@]}" restart agent ;;
   logs) exec "${compose[@]}" logs -f agent ;;
@@ -230,7 +240,9 @@ mv "$install_dir/seccomp/chromium.json.tmp" "$install_dir/seccomp/chromium.json"
 # Create files atomically; keep the same project/volume on every reinstallation.
 compose_tmp="$(mktemp "$install_dir/.compose.XXXXXX")"
 cp -- "$work_dir/compose.yaml" "$compose_tmp"; chmod 600 "$compose_tmp"; mv -- "$compose_tmp" "$install_dir/compose.yaml"
-docker compose -p "$project" -f "$install_dir/compose.yaml" up -d --wait --wait-timeout 900 </dev/null
+compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
+"${compose[@]}" up -d --wait --wait-timeout 240 --no-deps agent workspace-worker browser-worker browser-runtime browser-egress audio-worker computer-vm </dev/null
+"${compose[@]}" up -d --no-deps researcher-computer planner-computer reviewer-computer researcher-worker planner-worker reviewer-worker </dev/null
 printf '\nInstalled: %s\n' "$launcher"
 printf 'The agent, isolated workspace, browser, and audio services are installed. Existing conversation data is preserved in the agent-data volume.\n'
 if [[ "$auto_update_enabled" == true ]]; then printf 'Owner-triggered self-updates are enabled via /upgrade.\n'; else printf 'Self-updates need an active systemd service; use nopeus-agent update on the server meanwhile. A non-root user service also needs loginctl enable-linger.\n'; fi
