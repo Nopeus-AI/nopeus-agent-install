@@ -1,3 +1,4 @@
-source_version=0.2.0-alpha.22
-source_commit=0f372318ea3032d6fee4f02a4b01319c574ad31f
-release_tag=v0.2.0-alpha.22
+source_repository=Nopeus-AI/nopeus-agent
+asset_repository=Nopeus-AI/nopeus-agent-install
+release_discovery=GitHub releases API
+asset_verification=SHA256 archive checksums and immutable Docker image identities

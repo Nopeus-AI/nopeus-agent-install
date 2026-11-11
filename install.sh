@@ -2,14 +2,7 @@
 # Standalone Nopeus Agent public installer. No source checkout, build, or GitHub login.
 set -euo pipefail
 umask 077
-RELEASE='0.2.0-alpha.22'
-RELEASE_TAG='v0.2.0-alpha.22'
-IMAGES=(nopeus-agent-runtime:0.2.0-alpha.22 nopeus-agent-browser-egress:0.2.0-alpha.22 nopeus-agent-browser:0.2.0-alpha.22 nopeus-agent-browser-runtime:0.2.0-alpha.22 nopeus-agent-audio:0.2.0-alpha.22)
-IMAGE_IDS=(sha256:6ba5b7abb4a3b0fa9649f948f8dce0a15b961e409e14d56b2424b616de3d2bb7 sha256:64f032beaa61efcbc64f7980a1c4fd418506129717a07edce4a5380b02d7debe sha256:184fab2c001601b10025e7c6d822a5e41ca60b6cec64662b3c69f3559b76baea sha256:57c8a6ba2e706f2e220ab2fae1c7f91b7b115e06783a5e585691920c103209c1 sha256:5e8af8ef1853488b131eb0eb1540be3a17792793870430520880c30b253f8131)
-ARCHIVE_SHA256='d76414f2202e37604177de4804f1223d8841a48591c69dcac354f7be173e36c1'
-BROWSER_ARCHIVE_SHA256='144e2437ccc10c9774d97ed2384b19afe2961be1a476a94ba6f4a4c4945fc680'
-ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.2.0-alpha.22/nopeus-agent-linux-amd64.tar.gz'
-BROWSER_ARCHIVE_URL='https://github.com/Nopeus-AI/nopeus-agent-install/releases/download/v0.2.0-alpha.22/nopeus-agent-browser-linux-amd64.tar.gz'
+RELEASE_REPOSITORY='Nopeus-AI/nopeus-agent-install'
 run_setup=true
 case "${1:-}" in
   --no-setup) run_setup=false ;;
@@ -41,10 +34,34 @@ launcher="$bin_dir/nopeus-agent"
 if [[ -e "$launcher" || -L "$launcher" ]]; then
   [[ -f "$launcher" && ! -L "$launcher" ]] && head -n 3 -- "$launcher" | grep -Fq '# Nopeus Agent managed launcher' || die "Refusing to replace unrelated command: $launcher"
 fi
-printf 'Installing Nopeus Agent %s (standalone alpha).\n' "$RELEASE"
-printf 'Model keys and messaging accounts are configured afterward in the terminal UI.\n'
 work_dir="$(mktemp -d)"
 trap 'rm -rf -- "$work_dir"' EXIT
+release_list="$work_dir/releases.json"
+curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 \
+  "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=30" -o "$release_list" </dev/null
+RELEASE_TAG="$(sed -n 's/^[[:space:]]*"tag_name": "\([^"]*\)".*/\1/p' "$release_list" | sed -n '1p')"
+[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || die 'Could not find a published Nopeus Agent release.'
+RELEASE_INFO_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/release-info.txt"
+curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$RELEASE_INFO_URL" -o "$work_dir/release-info.txt" </dev/null
+release_field() { sed -n "s/^$1=//p" "$work_dir/release-info.txt" | sed -n '1p'; }
+RELEASE="$(release_field version)"
+[[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$RELEASE_TAG" == "v$RELEASE" ]] || die 'Latest release metadata has an invalid version.'
+[[ "$(release_field release_tag)" == "$RELEASE_TAG" ]] || die 'Release metadata tag does not match the selected release.'
+[[ "$(release_field source_commit)" =~ ^[a-f0-9]{40}$ ]] || die 'Release metadata has an invalid source commit.'
+ARCHIVE_SHA256="$(release_field archive_sha256)"
+BROWSER_ARCHIVE_SHA256="$(release_field browser_archive_sha256)"
+[[ "$ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ && "$BROWSER_ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]] || die 'Release metadata has invalid archive checksums.'
+IMAGE_TAG="$RELEASE"
+IMAGES=("nopeus-agent-runtime:$IMAGE_TAG" "nopeus-agent-computer:$IMAGE_TAG" "nopeus-agent-audio:$IMAGE_TAG" "nopeus-agent-browser-egress:$IMAGE_TAG" "nopeus-agent-browser:$IMAGE_TAG" "nopeus-agent-browser-runtime:$IMAGE_TAG")
+IMAGE_IDS=("$(release_field image_runtime)" "$(release_field image_computer)" "$(release_field image_audio)" "$(release_field image_egress)" "$(release_field image_browser)" "$(release_field image_browser_runtime)")
+for image_id in "${IMAGE_IDS[@]}"; do [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || die 'Release metadata has an invalid Docker image identity.'; done
+ARCHIVE_NAME="$(release_field archive)"
+BROWSER_ARCHIVE_NAME="$(release_field browser_archive)"
+[[ "$ARCHIVE_NAME" == nopeus-agent-linux-amd64.tar.gz && "$BROWSER_ARCHIVE_NAME" == nopeus-agent-browser-linux-amd64.tar.gz ]] || die 'Release metadata has unexpected archive names.'
+ARCHIVE_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/$ARCHIVE_NAME"
+BROWSER_ARCHIVE_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/$BROWSER_ARCHIVE_NAME"
+printf 'Installing Nopeus Agent %s (standalone alpha).\n' "$RELEASE"
+printf 'Model keys and messaging accounts are configured afterward in the terminal UI.\n'
 verify_images() {
   local i image_id
   for i in "${!IMAGES[@]}"; do
@@ -73,7 +90,7 @@ launcher_tmp="$(mktemp "$bin_dir/.nopeus-agent.XXXXXX")"
   cat <<'LAUNCHER'
 compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
 case "${1:-}" in
-  start) exec "${compose[@]}" up -d --wait --wait-timeout 240 ;;
+  start) exec "${compose[@]}" up -d --wait --wait-timeout 900 ;;
   stop) exec "${compose[@]}" stop ;;
   restart) exec "${compose[@]}" restart agent ;;
   logs) exec "${compose[@]}" logs -f agent ;;
@@ -142,7 +159,7 @@ mv "$install_dir/seccomp/chromium.json.tmp" "$install_dir/seccomp/chromium.json"
 # Create files atomically; keep the same project/volume on every reinstallation.
 compose_tmp="$(mktemp "$install_dir/.compose.XXXXXX")"
 cp -- "$work_dir/compose.yaml" "$compose_tmp"; chmod 600 "$compose_tmp"; mv -- "$compose_tmp" "$install_dir/compose.yaml"
-docker compose -p "$project" -f "$install_dir/compose.yaml" up -d --wait --wait-timeout 240 </dev/null
+docker compose -p "$project" -f "$install_dir/compose.yaml" up -d --wait --wait-timeout 900 </dev/null
 printf '\nInstalled: %s\n' "$launcher"
 printf 'The agent, isolated workspace, browser, and audio services are installed. Existing conversation data is preserved in the agent-data volume.\n'
 if [[ "$auto_update_enabled" == true ]]; then printf 'Owner-triggered self-updates are enabled via /upgrade.\n'; else printf 'Self-updates need an active systemd service; use nopeus-agent update on the server meanwhile. A non-root user service also needs loginctl enable-linger.\n'; fi

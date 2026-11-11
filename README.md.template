@@ -8,8 +8,8 @@ On an existing Linux x86-64 Docker server (including a Coolify host):
 curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash
 ```
 
-The installer downloads a checksum-pinned bundle of prebuilt agent, workspace,
-browser and audio images, installs a background service and the `nopeus-agent`
+The installer discovers the newest published Nopeus Agent release, verifies its
+checksummed runtime and image identities, installs a background service and the `nopeus-agent`
 command, and opens the terminal setup wizard. No
 GitHub login, source checkout, host Node.js, or build is needed. Enter model keys
 and channel settings in the wizard; settings and conversations persist in a Docker
@@ -20,23 +20,26 @@ Later: `nopeus-agent setup`, `nopeus-agent status`, `nopeus-agent logs`.
 Install unattended: `curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash -s -- --no-setup`.
 Run setup later from an interactive terminal.
 
-The current alpha includes isolated workspace tools, approval-gated file writes,
-terminal commands and browser interactions, public web research, schedules,
-conversation memory, versioned skills, image/PDF handling and local audio
-transcription. The browser and terminal workers run as separate services. This is
-still a Docker-based single-agent prototype, not a VM-per-agent boundary. Automatic
-skill evaluation, demonstration capture, teams, personal-device companions and
-native mobile clients are not included. AI usage and server costs are separate.
+The current standalone alpha includes approval-gated workspace and terminal tools,
+public web research, schedules, memory, versioned skills, browser demonstrations
+and replay, presentations, image/PDF understanding, audio transcription, and
+researcher/planner/reviewer specialists. Each specialist has a separate persistent
+workspace and Debian VM. Cross-workspace artifact imports require approval of the
+exact source, destination, and file contents. Automated skill promotion, coordinated
+team channels, spend limits, personal-device companions, and native mobile clients
+remain planned. AI usage and server costs are separate.
 
 ## Releases
 
-Release assets contain the Linux amd64 Docker image bundle, reviewed installer
-and checksums. This distribution repository does not contain development credentials,
+Versioned runtime assets are published with the standalone installer repository. This
+installer discovers the newest published version from this repository's public releases API and
+verifies the archive hashes and all six Docker image identities before starting it. This distribution repository does not contain development credentials,
 customer data, or the private development history. Runtime code and dependencies
 are included in the executable image; their notices remain in that image.
 
-Inspect the installer before running if desired. The script pins the release archive
-SHA256 and every Docker image identity. Installation requires permission to use
+Inspect the installer before running if desired. The version changes automatically
+when a newer runtime release is published; the selected release metadata pins both
+archive SHA256 values and every Docker image identity. Installation requires permission to use
 Docker and an interactive controlling terminal unless `--no-setup` is passed.
 
 Persistent volumes include `agent-data`, `agent-workspace`, `agent-control`,
@@ -52,8 +55,8 @@ works directly and needs no GitHub login.
 
 On hosts with an active systemd service, the installer enables a small host-side
 watcher. An authorized private Telegram or WhatsApp sender can ask for an update
-or send `/upgrade`. The watcher runs the checksum-pinned installer and restarts the
-container while preserving its data volume. The model receives no shell or Docker
+or send `/upgrade`. The watcher runs the installer, which discovers the newest published runtime release,
+verifies its checksum-pinned images, and restarts the stack while preserving data. The model receives no shell or Docker
 access. Without systemd, update from the server terminal with `nopeus-agent update`.
 This update action does not let the model change its own source code.
 
@@ -61,7 +64,8 @@ This update action does not let the model change its own source code.
 
 The runtime registers `/start`, `/new`, `/status`, `/handoff`, `/link`, `/cancel`,
 `/upgrade`, and `/version` with Telegram on startup. They appear in the chat's slash
-command menu. Existing agent data is preserved during upgrade.
+command menu. The installer checks the newest published version on each upgrade and preserves
+existing conversation and workspace volumes.
 
 ## OpenAI subscription login (v0.1.1)
 
