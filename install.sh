@@ -36,6 +36,7 @@ if [[ -e "$launcher" || -L "$launcher" ]]; then
 fi
 work_dir="$(mktemp -d)"
 update_started=false
+OLD_VERSION=""
 update_project_compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
 send_update_telegram() {
   local message="$1"
@@ -44,11 +45,19 @@ send_update_telegram() {
 finish_install() {
   local status=$?
   if [[ "$status" -ne 0 && "$update_started" == true ]]; then
-    send_update_telegram "⚠️ Nopeus Agent could not finish the update to v$RELEASE. The running version was not confirmed. Please retry /upgrade or run nopeus-agent update on the server." || true
+    local target="${RELEASE:-the latest release}"
+    send_update_telegram "⚠️ Nopeus Agent could not finish its update to $target. The running version was not confirmed; it should still be v$OLD_VERSION. Please retry /upgrade or run nopeus-agent update on the server." || true
   fi
   rm -rf -- "$work_dir"
 }
 trap finish_install EXIT
+# Read the running version before contacting GitHub so an update request still
+# gets a useful failure notice if release lookup or metadata validation fails.
+compose=("${update_project_compose[@]}")
+OLD_VERSION="$("${compose[@]}" exec -T agent node -p "require('./package.json').version" 2>/dev/null || true)"
+if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+  update_started=true
+fi
 release_list="$work_dir/releases.json"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 \
   "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=30" -o "$release_list" </dev/null
@@ -81,9 +90,7 @@ printf 'Model keys and messaging accounts are configured afterward in the termin
 # start notice through its existing Telegram configuration and preserve a
 # completion notice in the shared data volume for the new runtime to send.
 compose=("${update_project_compose[@]}")
-OLD_VERSION="$("${compose[@]}" exec -T agent node -p "require('./package.json').version" 2>/dev/null || true)"
 if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$OLD_VERSION" != "$RELEASE" ]]; then
-  update_started=true
   start_message="⏳ Nopeus Agent update started: v$OLD_VERSION → v$RELEASE. Downloading the runtime images now; this may take several minutes. I will restart and send a confirmation with the new version and release notes when it is ready."
   send_update_telegram "$start_message" || printf 'Could not deliver Telegram update-start notice; continuing installation.\n' >&2
   "${compose[@]}" exec -T \
@@ -91,6 +98,9 @@ if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$OLD_VERS
     -e NOPEUS_UPDATE_TO_VERSION="$RELEASE" \
     -e NOPEUS_UPDATE_SUMMARY="$RELEASE_SUMMARY" \
     agent node --input-type=module -e 'import { openSync, writeFileSync, closeSync, renameSync, lstatSync, existsSync } from "node:fs"; import { join } from "node:path"; import { dataDirectory } from "./src/config.js"; const dir=dataDirectory(); const path=join(dir,"update-notice.json"); if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("Refusing symlinked update notice"); const temp=join(dir,".update-notice-"+process.pid+".tmp"); const fd=openSync(temp,"wx",0o600); try { writeFileSync(fd,JSON.stringify({fromVersion:process.env.NOPEUS_UPDATE_FROM_VERSION,toVersion:process.env.NOPEUS_UPDATE_TO_VERSION,summary:process.env.NOPEUS_UPDATE_SUMMARY})+"\n"); closeSync(fd); renameSync(temp,path); } catch(e) { try { closeSync(fd); } catch {} throw e; }' >/dev/null 2>&1 || die 'Could not preserve the Telegram update completion notice; update cancelled before replacing the running agent.'
+elif [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+  update_started=false
+  send_update_telegram "✅ Nopeus Agent is already up to date. This server is running v$OLD_VERSION, the latest published release. No restart was needed." || true
 fi
 verify_images() {
   local i image_id
