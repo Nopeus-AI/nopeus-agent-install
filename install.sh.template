@@ -204,7 +204,11 @@ if [[ ! -f "$work_dir/package/compose.yaml" ]]; then
   mkdir -p "$work_dir/package"
   tar -xzf "$work_dir/release.tar.gz" --no-same-owner --no-same-permissions -C "$work_dir/package"
 fi
-sed "s/__AUTO_UPDATE_ENABLED__/$auto_update_enabled/" "$work_dir/package/compose.yaml" > "$work_dir/compose.yaml"
+# TCG-backed QEMU guests need more host RSS than their configured guest RAM.
+# Keep 1 GiB specialist VMs from hitting the old 1.5 GiB container cap.
+sed -e "s/__AUTO_UPDATE_ENABLED__/$auto_update_enabled/" \
+  -e 's/"mem_limit": "1610612736"/"mem_limit": "2147483648"/g' \
+  "$work_dir/package/compose.yaml" > "$work_dir/compose.yaml"
 [[ ! -L "$install_dir/seccomp" ]] || die 'Refusing symlinked seccomp configuration.'
 mkdir -p "$install_dir/seccomp"
 cp "$work_dir/package/seccomp/chromium.json" "$install_dir/seccomp/chromium.json.tmp"
