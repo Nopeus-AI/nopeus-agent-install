@@ -35,7 +35,20 @@ if [[ -e "$launcher" || -L "$launcher" ]]; then
   [[ -f "$launcher" && ! -L "$launcher" ]] && head -n 3 -- "$launcher" | grep -Fq '# Nopeus Agent managed launcher' || die "Refusing to replace unrelated command: $launcher"
 fi
 work_dir="$(mktemp -d)"
-trap 'rm -rf -- "$work_dir"' EXIT
+update_started=false
+update_project_compose=(docker compose -p "$project" -f "$install_dir/compose.yaml")
+send_update_telegram() {
+  local message="$1"
+  "${update_project_compose[@]}" exec -T -e NOPEUS_UPDATE_MESSAGE="$message" agent node --input-type=module -e 'import { runtimeEnvironment } from "./src/config.js"; const env=runtimeEnvironment(); if (!env.TELEGRAM_BOT_TOKEN) process.exit(0); for (const id of (env.TELEGRAM_ALLOWED_USERS||"").split(",").filter(x=>/^\d+$/.test(x))) { const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:id,text:process.env.NOPEUS_UPDATE_MESSAGE})}); if (!r.ok) throw new Error("Telegram update notice failed"); }' >/dev/null 2>&1
+}
+finish_install() {
+  local status=$?
+  if [[ "$status" -ne 0 && "$update_started" == true ]]; then
+    send_update_telegram "⚠️ Nopeus Agent could not finish the update to v$RELEASE. The running version was not confirmed. Please retry /upgrade or run nopeus-agent update on the server." || true
+  fi
+  rm -rf -- "$work_dir"
+}
+trap finish_install EXIT
 release_list="$work_dir/releases.json"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 \
   "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=30" -o "$release_list" </dev/null
@@ -46,6 +59,8 @@ curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$RE
 release_field() { sed -n "s/^$1=//p" "$work_dir/release-info.txt" | sed -n '1p'; }
 RELEASE="$(release_field version)"
 [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$RELEASE_TAG" == "v$RELEASE" ]] || die 'Latest release metadata has an invalid version.'
+RELEASE_SUMMARY="$(release_field summary)"
+[[ -n "$RELEASE_SUMMARY" && ${#RELEASE_SUMMARY} -le 500 && "$RELEASE_SUMMARY" != *$'\n'* && "$RELEASE_SUMMARY" != *$'\r'* ]] || RELEASE_SUMMARY="This release includes improvements and fixes."
 [[ "$(release_field release_tag)" == "$RELEASE_TAG" ]] || die 'Release metadata tag does not match the selected release.'
 [[ "$(release_field source_commit)" =~ ^[a-f0-9]{40}$ ]] || die 'Release metadata has an invalid source commit.'
 ARCHIVE_SHA256="$(release_field archive_sha256)"
@@ -62,6 +77,21 @@ ARCHIVE_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_T
 BROWSER_ARCHIVE_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/$BROWSER_ARCHIVE_NAME"
 printf 'Installing Nopeus Agent %s (standalone alpha).\n' "$RELEASE"
 printf 'Model keys and messaging accounts are configured afterward in the terminal UI.\n'
+# Capture the old runtime's version before its image is replaced. Deliver the
+# start notice through its existing Telegram configuration and preserve a
+# completion notice in the shared data volume for the new runtime to send.
+compose=("${update_project_compose[@]}")
+OLD_VERSION="$("${compose[@]}" exec -T agent node -p "require('./package.json').version" 2>/dev/null || true)"
+if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ && "$OLD_VERSION" != "$RELEASE" ]]; then
+  update_started=true
+  start_message="⏳ Nopeus Agent update started: v$OLD_VERSION → v$RELEASE. Downloading the runtime images now; this may take several minutes. I will restart and send a confirmation with the new version and release notes when it is ready."
+  send_update_telegram "$start_message" || printf 'Could not deliver Telegram update-start notice; continuing installation.\n' >&2
+  "${compose[@]}" exec -T \
+    -e NOPEUS_UPDATE_FROM_VERSION="$OLD_VERSION" \
+    -e NOPEUS_UPDATE_TO_VERSION="$RELEASE" \
+    -e NOPEUS_UPDATE_SUMMARY="$RELEASE_SUMMARY" \
+    agent node --input-type=module -e 'import { openSync, writeFileSync, closeSync, renameSync, lstatSync, existsSync } from "node:fs"; import { join } from "node:path"; import { dataDirectory } from "./src/config.js"; const dir=dataDirectory(); const path=join(dir,"update-notice.json"); if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("Refusing symlinked update notice"); const temp=join(dir,".update-notice-"+process.pid+".tmp"); const fd=openSync(temp,"wx",0o600); try { writeFileSync(fd,JSON.stringify({fromVersion:process.env.NOPEUS_UPDATE_FROM_VERSION,toVersion:process.env.NOPEUS_UPDATE_TO_VERSION,summary:process.env.NOPEUS_UPDATE_SUMMARY})+"\\n"); closeSync(fd); renameSync(temp,path); } catch(e) { try { closeSync(fd); } catch {} throw e; }' >/dev/null 2>&1 || die 'Could not preserve the Telegram update completion notice; update cancelled before replacing the running agent.'
+fi
 verify_images() {
   local i image_id
   for i in "${!IMAGES[@]}"; do
