@@ -143,6 +143,7 @@ watcher_tmp="$(mktemp "$install_dir/.update-watcher.XXXXXX")"
   printf 'launcher=%q\n' "$launcher"
   cat <<'WATCHER'
 while true; do
+  "$launcher" update-watcher-heartbeat >/dev/null 2>&1 || true
   request_id="$("$launcher" update-request-check 2>/dev/null || true)"
   if [[ "$request_id" =~ ^[0-9a-f-]{36}$ ]] && "$launcher" update-request-clear "$request_id" >/dev/null 2>&1; then
     if ! "$launcher" update; then printf '%s\n' 'Nopeus Agent self-update failed; request cleared. Retry with /upgrade or update from the server.' >&2; fi
