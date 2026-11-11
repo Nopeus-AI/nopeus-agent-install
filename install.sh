@@ -12,6 +12,7 @@ case "${1:-}" in
 esac
 die() { printf '%s\n' "$*" >&2; exit 1; }
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || die 'This pilot installer supports Linux x86-64 servers only.'
+printf 'Checking Docker and the existing Nopeus Agent installation...\n'
 for command in docker curl sha256sum tar gzip sed sort awk grep; do command -v "$command" >/dev/null || die "Required command missing: $command"; done
 docker compose version >/dev/null || die 'Docker Compose v2 is required.'
 docker info >/dev/null 2>&1 || die 'Cannot access Docker. Use a server account authorized to run Docker (Coolify servers already have it).'
@@ -59,6 +60,7 @@ if [[ "$OLD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
   update_started=true
 fi
 release_list="$work_dir/releases.json"
+printf 'Checking the latest published agent release...\n'
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 \
   "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=30" -o "$release_list" </dev/null
 RELEASE_TAG="$(sed -n 's/^[[:space:]]*"tag_name": "\([^"]*\)".*/\1/p' "$release_list" \
@@ -67,6 +69,7 @@ RELEASE_TAG="$(sed -n 's/^[[:space:]]*"tag_name": "\([^"]*\)".*/\1/p' "$release_
   | sort -t $'\t' -k1,1V -k2,2n -k3,3V \
   | tail -n 1 | cut -f 3 || true)"
 [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || die 'Could not find a published Nopeus Agent release.'
+printf 'Selected release %s. Validating its release metadata...\n' "$RELEASE_TAG"
 RELEASE_INFO_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/release-info.txt"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$RELEASE_INFO_URL" -o "$work_dir/release-info.txt" </dev/null
 release_field() { sed -n "s/^$1=//p" "$work_dir/release-info.txt" | sed -n '1p'; }
@@ -141,7 +144,14 @@ case "${1:-}" in
   update)
     export NOPEUS_INSTALL_DIR="$install_dir" NOPEUS_PROJECT_NAME="$project"
     export NOPEUS_BIN_DIR="$(dirname -- "${BASH_SOURCE[0]}")"
-    curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash -s -- --no-setup ;;
+    update_script="$(mktemp)"
+    trap 'rm -f -- "$update_script"' EXIT
+    printf 'Downloading the Nopeus Agent updater...\n'
+    curl --fail --location --show-error --retry 3 --connect-timeout 15 \
+      https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh \
+      -o "$update_script"
+    printf 'Starting the updater. It will report the selected release and any failed step below.\n'
+    bash "$update_script" --no-setup ;;
   *) exec "${compose[@]}" exec agent node src/cli.js "$@" ;;
 esac
 LAUNCHER
