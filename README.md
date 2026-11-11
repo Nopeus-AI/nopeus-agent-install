@@ -55,7 +55,7 @@ works directly and needs no GitHub login.
 
 On hosts with an active systemd service, the installer enables a small host-side
 watcher. An authorized private Telegram or WhatsApp sender can ask for an update
-or send `/upgrade`. The watcher runs the installer, which discovers the newest published runtime release,
+or send `/upgrade`. The watcher runs the installer, which selects the highest published semantic version (including prereleases),
 verifies its checksum-pinned images, and restarts the stack while preserving data. The model receives no shell or Docker
 access. Without systemd, update from the server terminal with `nopeus-agent update`.
 This update action does not let the model change its own source code.

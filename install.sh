@@ -12,7 +12,7 @@ case "${1:-}" in
 esac
 die() { printf '%s\n' "$*" >&2; exit 1; }
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || die 'This pilot installer supports Linux x86-64 servers only.'
-for command in docker curl sha256sum tar gzip sed; do command -v "$command" >/dev/null || die "Required command missing: $command"; done
+for command in docker curl sha256sum tar gzip sed sort awk grep; do command -v "$command" >/dev/null || die "Required command missing: $command"; done
 docker compose version >/dev/null || die 'Docker Compose v2 is required.'
 docker info >/dev/null 2>&1 || die 'Cannot access Docker. Use a server account authorized to run Docker (Coolify servers already have it).'
 [[ "$(docker info --format '{{.OSType}}')" == linux ]] || die 'A Linux Docker engine is required.'
@@ -61,7 +61,11 @@ fi
 release_list="$work_dir/releases.json"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 \
   "https://api.github.com/repos/$RELEASE_REPOSITORY/releases?per_page=30" -o "$release_list" </dev/null
-RELEASE_TAG="$(sed -n 's/^[[:space:]]*"tag_name": "\([^"]*\)".*/\1/p' "$release_list" | sed -n '1p')"
+RELEASE_TAG="$(sed -n 's/^[[:space:]]*"tag_name": "\([^"]*\)".*/\1/p' "$release_list" \
+  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$' \
+  | awk '{ tag=$0; version=tag; sub(/^v/, "", version); base=version; sub(/-.*/, "", base); stable=(version == base ? 1 : 0); print base "\t" stable "\t" tag }' \
+  | sort -t $'\t' -k1,1V -k2,2n -k3,3V \
+  | tail -n 1 | cut -f 3 || true)"
 [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || die 'Could not find a published Nopeus Agent release.'
 RELEASE_INFO_URL="https://github.com/$RELEASE_REPOSITORY/releases/download/$RELEASE_TAG/release-info.txt"
 curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 "$RELEASE_INFO_URL" -o "$work_dir/release-info.txt" </dev/null
