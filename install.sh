@@ -177,6 +177,83 @@ case "${1:-}" in
       -o "$update_script"
     printf 'Starting the updater. It will report the selected release and any failed step below.\n'
     bash "$update_script" --no-setup ;;
+  uninstall)
+    keep_data=false; assume_yes=false; dry_run=false
+    for arg in "${@:2}"; do
+      case "$arg" in
+        --keep-data) keep_data=true ;;
+        --yes|-y) assume_yes=true ;;
+        --dry-run) dry_run=true ;;
+        -h|--help)
+          printf 'Usage: nopeus-agent uninstall [--keep-data] [--yes] [--dry-run]\n'
+          printf '  --keep-data  Remove the stack, images, launcher, and updater but keep data volumes.\n'
+          printf '  --yes        Do not ask for confirmation.\n'
+          printf '  --dry-run    Print what would be removed without changing anything.\n'
+          exit 0 ;;
+        *) printf 'Unknown uninstall option: %s\n' "$arg" >&2; exit 2 ;;
+      esac
+    done
+    launcher_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
+    unit_file=/etc/systemd/system/nopeus-agent-updater.service
+    if [[ "$dry_run" == false && "$assume_yes" == false ]]; then
+      if [[ ! -t 0 ]]; then
+        printf 'Refusing to uninstall without a terminal. Re-run with --yes to confirm.\n' >&2
+        exit 1
+      fi
+      printf '\n'
+      if [[ "$keep_data" == true ]]; then
+        printf 'This removes the Nopeus Agent stack, images, launcher, and updater service.\nData volumes will be kept.\n'
+      else
+        printf 'This removes the Nopeus Agent stack and ALL data:\nconversations, settings, workspace, browser profile, and VM disks.\n'
+      fi
+      printf 'Type "uninstall nopeus-agent" to continue: '
+      read -r confirmation || confirmation=''
+      [[ "$confirmation" == 'uninstall nopeus-agent' ]] || { printf 'Aborted.\n'; exit 1; }
+    fi
+    if [[ "$dry_run" == true ]]; then
+      printf 'Would disable and remove %s\n' "$unit_file"
+      if [[ "$keep_data" == true ]]; then
+        printf 'Would run: docker compose -p %s -f %s down --rmi all --remove-orphans\n' "$project" "$install_dir/compose.yaml"
+      else
+        printf 'Would run: docker compose -p %s -f %s down --volumes --rmi all --remove-orphans\n' "$project" "$install_dir/compose.yaml"
+      fi
+      printf 'Would remove project containers, networks, images%s.\n' "$([[ "$keep_data" == true ]] && printf '' || printf ', and volumes')"
+      printf 'Would remove launcher %s\n' "$launcher_path"
+      printf 'Would remove install directory %s\n' "$install_dir"
+      exit 0
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -e "$unit_file" ]]; then
+      systemctl disable --now nopeus-agent-updater.service >/dev/null 2>&1 || true
+      rm -f -- "$unit_file"
+      systemctl daemon-reload >/dev/null 2>&1 || true
+      printf 'Removed the host updater service.\n'
+    fi
+    if [[ -f "$install_dir/compose.yaml" ]]; then
+      if [[ "$keep_data" == true ]]; then
+        if ! "${compose[@]}" down --rmi all --remove-orphans; then printf 'Compose reported an error; removing remaining project resources directly.\n' >&2; fi
+      else
+        if ! "${compose[@]}" down --volumes --rmi all --remove-orphans; then printf 'Compose reported an error; removing remaining project resources directly.\n' >&2; fi
+      fi
+    fi
+    if command -v docker >/dev/null 2>&1; then
+      mapfile -t containers < <(docker ps -aq --filter "label=com.docker.compose.project=$project" 2>/dev/null || true)
+      if ((${#containers[@]})); then docker rm -f "${containers[@]}" >/dev/null 2>&1 || true; fi
+      mapfile -t networks < <(docker network ls -q --filter "label=com.docker.compose.project=$project" 2>/dev/null || true)
+      if ((${#networks[@]})); then docker network rm "${networks[@]}" >/dev/null 2>&1 || true; fi
+      if [[ "$keep_data" == false ]]; then
+        mapfile -t volumes < <(docker volume ls -q --filter "label=com.docker.compose.project=$project" 2>/dev/null || true)
+        if ((${#volumes[@]})); then docker volume rm "${volumes[@]}" >/dev/null 2>&1 || true; fi
+      fi
+      mapfile -t images < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E '^nopeus-agent-(runtime|computer|audio|browser|browser-egress|browser-runtime):' || true)
+      if ((${#images[@]})); then docker rmi "${images[@]}" >/dev/null 2>&1 || true; fi
+    fi
+    rm -f -- "$launcher_path"
+    rm -rf -- "$install_dir"
+    if [[ "$keep_data" == true ]]; then
+      printf 'Nopeus Agent uninstalled. Data volumes were kept; reinstall with the same project name to reuse them.\n'
+    else
+      printf 'Nopeus Agent uninstalled and all data removed.\n'
+    fi ;;
   *) exec "${compose[@]}" exec agent node src/cli.js "$@" ;;
 esac
 LAUNCHER
@@ -257,5 +334,5 @@ if [[ "$run_setup" == true ]]; then
   # curl | bash owns stdin. Read terminal interaction from the controlling TTY instead.
   "$launcher" setup </dev/tty >/dev/tty 2>/dev/tty
 fi
-printf '\nCommands: nopeus-agent setup | nopeus-agent status | nopeus-agent logs\n'
+printf '\nCommands: nopeus-agent setup | nopeus-agent status | nopeus-agent logs | nopeus-agent uninstall\n'
 printf 'This is the standalone agent pilot, separate from Nopeus Business and Coolify-managed apps.\n'

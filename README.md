@@ -16,7 +16,8 @@ and channel settings in the wizard; settings and conversations persist in a Dock
 volume. No public ports or domains are required. Docker Compose v2 is a prerequisite;
 the installer does not install or reconfigure Docker or other Coolify applications.
 
-Later: `nopeus-agent setup`, `nopeus-agent status`, `nopeus-agent logs`.
+Later: `nopeus-agent setup`, `nopeus-agent status`, `nopeus-agent logs`,
+`nopeus-agent uninstall`.
 Install unattended: `curl -fsSL https://raw.githubusercontent.com/Nopeus-AI/nopeus-agent-install/main/install.sh | bash -s -- --no-setup`.
 Run setup later from an interactive terminal.
 
@@ -50,6 +51,29 @@ conversation history, files, and browser state. No Business migration is perform
 The shorter `https://nopeus.xyz/agent/install` alias redirects to the current
 installer on this repository's main branch. The public GitHub URL above also
 works directly and needs no GitHub login.
+
+## Uninstall
+
+Remove the stack, images, launcher, and host updater:
+
+```sh
+nopeus-agent uninstall
+```
+
+The command asks you to type `uninstall nopeus-agent` before it deletes the data
+volumes. Deletion is permanent: conversations, settings, workspace files, browser
+profile, and VM disks are removed. Back up first with `nopeus-agent backup` if
+you need them.
+
+To remove the stack, images, launcher, and updater but keep the data volumes:
+
+```sh
+nopeus-agent uninstall --keep-data
+```
+
+A later reinstall with the same project name reuses those volumes. Use
+`--dry-run` to print exactly what would be removed, and `--yes` for unattended
+removal. The command refuses to run without `--yes` when there is no terminal.
 
 ## Owner-triggered self-update (v0.1.7)
 
